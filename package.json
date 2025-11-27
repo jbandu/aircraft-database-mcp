@@ -36,6 +36,7 @@
   "author": "Number Labs",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
