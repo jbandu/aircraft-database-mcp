@@ -1,0 +1,204 @@
+{
+  "mcpServers": {
+    "aircraft-database": {
+      "command": "node",
+      "args": ["dist/mcp-server/index.js"],
+      "env": {
+        "NODE_ENV": "production"
+      },
+      "description": "Aircraft Database MCP Server - Canonical source of truth for airline fleet data",
+      "version": "1.0.0",
+      "tools": [
+        {
+          "name": "get_airline_fleet",
+          "description": "Get complete fleet information for a specific airline",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "airline_code": {
+                "type": "string",
+                "description": "IATA or ICAO airline code (e.g., 'AA', 'DAL')"
+              },
+              "include_inactive": {
+                "type": "boolean",
+                "description": "Include inactive/retired aircraft",
+                "default": false
+              }
+            },
+            "required": ["airline_code"]
+          }
+        },
+        {
+          "name": "get_aircraft_details",
+          "description": "Get detailed information about a specific aircraft by registration or serial number",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string",
+                "description": "Aircraft registration (e.g., 'N12345') or manufacturer serial number"
+              },
+              "identifier_type": {
+                "type": "string",
+                "enum": ["registration", "serial_number"],
+                "description": "Type of identifier provided",
+                "default": "registration"
+              }
+            },
+            "required": ["identifier"]
+          }
+        },
+        {
+          "name": "search_aircraft",
+          "description": "Search for aircraft by various criteria",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query (aircraft type, airline, registration, etc.)"
+              },
+              "filters": {
+                "type": "object",
+                "properties": {
+                  "aircraft_type": {
+                    "type": "string",
+                    "description": "Aircraft type/model (e.g., 'A320', 'B737-800')"
+                  },
+                  "airline_code": {
+                    "type": "string",
+                    "description": "Filter by airline IATA/ICAO code"
+                  },
+                  "manufacturer": {
+                    "type": "string",
+                    "description": "Aircraft manufacturer (e.g., 'Boeing', 'Airbus')"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["active", "stored", "retired", "on_order"],
+                    "description": "Aircraft operational status"
+                  },
+                  "min_year": {
+                    "type": "integer",
+                    "description": "Minimum manufacturing year"
+                  },
+                  "max_year": {
+                    "type": "integer",
+                    "description": "Maximum manufacturing year"
+                  }
+                }
+              },
+              "limit": {
+                "type": "integer",
+                "description": "Maximum number of results",
+                "default": 50,
+                "maximum": 500
+              },
+              "offset": {
+                "type": "integer",
+                "description": "Pagination offset",
+                "default": 0
+              }
+            },
+            "required": ["query"]
+          }
+        },
+        {
+          "name": "get_fleet_statistics",
+          "description": "Get aggregated statistics about airline fleet or specific aircraft types",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": ["airline", "aircraft_type", "manufacturer", "global"],
+                "description": "Scope of statistics"
+              },
+              "scope_value": {
+                "type": "string",
+                "description": "Value for the scope (airline code, aircraft type, or manufacturer name)"
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "total_count",
+                    "average_age",
+                    "status_breakdown",
+                    "type_distribution",
+                    "configuration_summary",
+                    "utilization_stats"
+                  ]
+                },
+                "description": "Specific metrics to include"
+              }
+            },
+            "required": ["scope"]
+          }
+        },
+        {
+          "name": "trigger_fleet_update",
+          "description": "Manually trigger a fleet data update for specific airlines or all airlines",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "airline_codes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Array of airline codes to update. If empty, updates all airlines"
+              },
+              "force_refresh": {
+                "type": "boolean",
+                "description": "Force refresh even if recently updated",
+                "default": false
+              },
+              "priority": {
+                "type": "string",
+                "enum": ["high", "normal", "low"],
+                "description": "Priority level for the update job",
+                "default": "normal"
+              }
+            }
+          }
+        },
+        {
+          "name": "get_aircraft_history",
+          "description": "Get operational history and lineage of an aircraft",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "registration": {
+                "type": "string",
+                "description": "Aircraft registration number"
+              },
+              "include_operators": {
+                "type": "boolean",
+                "description": "Include all previous operators",
+                "default": true
+              },
+              "include_configurations": {
+                "type": "boolean",
+                "description": "Include configuration change history",
+                "default": false
+              }
+            },
+            "required": ["registration"]
+          }
+        }
+      ],
+      "resources": [],
+      "prompts": []
+    }
+  },
+  "development": {
+    "command": "tsx",
+    "args": ["src/mcp-server/index.ts"],
+    "env": {
+      "NODE_ENV": "development",
+      "DEBUG": "aircraft-mcp:*"
+    }
+  }
+}

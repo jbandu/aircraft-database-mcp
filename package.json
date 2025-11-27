@@ -1,0 +1,64 @@
+{
+  "name": "aircraft-database-mcp",
+  "version": "1.0.0",
+  "description": "Aircraft Database MCP Server - Canonical source of truth for airline fleet data",
+  "main": "dist/mcp-server/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/mcp-server/index.ts",
+    "dev:mcp": "tsx src/mcp-server/index.ts",
+    "build": "tsc",
+    "start": "node dist/mcp-server/index.js",
+    "test": "tsx scripts/test-mcp-tools.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:seed": "tsx scripts/seed-top-100-airlines.ts",
+    "db:reset": "tsx scripts/db-reset.ts",
+    "neo4j:init": "tsx scripts/neo4j-init.ts",
+    "neo4j:sync": "tsx src/database/neo4j/sync-from-postgres.ts",
+    "neo4j:sync:full": "tsx src/database/neo4j/sync-from-postgres.ts --full",
+    "neo4j:sync:dry-run": "tsx src/database/neo4j/sync-from-postgres.ts --dry-run",
+    "neo4j:clear": "tsx src/database/neo4j/sync-from-postgres.ts --clear",
+    "scraper:run": "tsx src/scrapers/workflows/airline-scraper-workflow.ts",
+    "scraper:schedule": "tsx src/scrapers/workflows/scheduler.ts",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "aircraft",
+    "airline",
+    "fleet",
+    "aviation",
+    "database"
+  ],
+  "author": "Number Labs",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.7",
+    "neo4j-driver": "^5.27.0",
+    "pg": "^8.13.1",
+    "playwright": "^1.49.1",
+    "postgres": "^3.4.5",
+    "winston": "^3.17.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@typescript-eslint/eslint-plugin": "^8.18.1",
+    "@typescript-eslint/parser": "^8.18.1",
+    "eslint": "^9.16.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
