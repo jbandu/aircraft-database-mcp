@@ -4,7 +4,8 @@
  * Wrapper for Ollama API for local LLM inference
  */
 
-import axios, { AxiosInstance } from 'axios';
+import axios from 'axios';
+import type { AxiosInstance } from 'axios';
 import { createLogger } from './logger.js';
 import { getLLMConfig } from './llm-config.js';
 
@@ -145,7 +146,7 @@ export class OllamaClient {
       // Try to extract JSON from response (handle markdown code blocks)
       const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/) || response.match(/```\n([\s\S]*?)\n```/);
 
-      const jsonStr = jsonMatch ? jsonMatch[1] : response;
+      const jsonStr = jsonMatch?.[1] || response;
 
       return JSON.parse(jsonStr.trim()) as T;
     } catch (error) {

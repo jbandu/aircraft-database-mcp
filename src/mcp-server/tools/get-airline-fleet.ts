@@ -134,20 +134,20 @@ export async function handleGetAirlineFleet(args: any) {
         at.variant,
         at.type_category,
         a.status,
-        EXTRACT(YEAR FROM AGE(CURRENT_DATE, a.manufactured_date))::FLOAT as age_years,
-        a.manufactured_date as manufacture_date,
+        EXTRACT(YEAR FROM AGE(CURRENT_DATE, a.manufacture_date))::FLOAT as age_years,
+        a.manufacture_date,
         ac.total_seats,
         ac.configuration_name
         ${
           include_details
-            ? `, a.msn, a.engines, a.ownership_type, a.home_base,
-           a.total_flight_hours, a.last_flight_date`
+            ? `, a.manufacturer_serial_number as msn, a.engines,
+           a.last_seen_date as last_flight_date`
             : ''
         }
       FROM aircraft a
       LEFT JOIN aircraft_types at ON a.aircraft_type_id = at.id
       LEFT JOIN aircraft_configurations ac ON a.id = ac.aircraft_id AND ac.is_current = true
-      WHERE a.airline_id = $1
+      WHERE a.current_airline_id = $1
     `;
 
     // Apply status filter

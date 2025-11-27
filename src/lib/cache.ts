@@ -139,7 +139,7 @@ setInterval(() => {
  */
 export function cached(ttl?: number) {
   return function (
-    target: any,
+    _target: any,
     propertyKey: string,
     descriptor: PropertyDescriptor
   ) {

@@ -5,9 +5,8 @@
  * Maintains graph consistency and handles incremental updates
  */
 
-import { queryPostgres, queryNeo4j, withNeo4jTransaction } from '../../lib/db-clients.js';
+import { queryPostgres, queryNeo4j } from '../../lib/db-clients.js';
 import { createLogger } from '../../lib/logger.js';
-import neo4j from 'neo4j-driver';
 
 const logger = createLogger('neo4j-sync');
 
@@ -298,7 +297,7 @@ export class Neo4jSyncService {
   /**
    * Sync airports (placeholder - would need airport data source)
    */
-  private async syncAirports(options: SyncOptions): Promise<number> {
+  private async syncAirports(_options: SyncOptions): Promise<number> {
     // TODO: Implement when airport data is available
     logger.info('Airport sync not yet implemented');
     return 0;
@@ -526,7 +525,7 @@ export class Neo4jSyncService {
   /**
    * Create BASED_AT relationships (Aircraft -> Airport)
    */
-  private async syncBasedAtRelationships(options: SyncOptions): Promise<number> {
+  private async syncBasedAtRelationships(_options: SyncOptions): Promise<number> {
     // TODO: Implement when airport data and home_base field are populated
     logger.info('BASED_AT relationships not yet implemented');
     return 0;

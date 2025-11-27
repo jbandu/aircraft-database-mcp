@@ -1,0 +1,960 @@
+openapi: 3.0.0
+info:
+  title: Aircraft Database API
+  description: |
+    REST API for the Aircraft Database MCP Server.
+
+    Provides endpoints for querying airline fleet data, aircraft information,
+    statistics, and scraping job management.
+
+    ## Authentication
+    All endpoints (except /health) require an API key provided via:
+    - `X-API-Key` header, or
+    - `Authorization: Bearer <key>` header
+
+    ## Rate Limiting
+    - 100 tokens per client
+    - 10 tokens/second refill rate
+    - Different endpoints have different costs:
+      - Search/global stats: 5 tokens
+      - List operations: 2 tokens
+      - Write operations: 3 tokens
+      - Other: 1 token
+  version: 1.0.0
+  contact:
+    name: Number Labs
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Development server
+  - url: https://api.aircraft-database.com/api/v1
+    description: Production server
+
+tags:
+  - name: Airlines
+    description: Airline management and fleet operations
+  - name: Aircraft
+    description: Aircraft search and details
+  - name: Statistics
+    description: Fleet and airline statistics
+  - name: Scraping
+    description: Scraping job management
+  - name: Health
+    description: Health check endpoint
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns server health status and database connectivity
+      security: []
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: healthy
+                timestamp: '2025-01-15T10:30:00.000Z'
+                uptime: 3600
+                database: connected
+        '503':
+          description: Server is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: unhealthy
+                timestamp: '2025-01-15T10:30:00.000Z'
+                uptime: 3600
+                database: disconnected
+
+  /airlines:
+    get:
+      tags:
+        - Airlines
+      summary: List airlines
+      description: Get a paginated list of airlines with optional filtering
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: country
+          in: query
+          description: Filter by country name
+          schema:
+            type: string
+          example: United States
+        - name: limit
+          in: query
+          description: Number of results to return
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Number of results to skip
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: sortBy
+          in: query
+          description: Field to sort by
+          schema:
+            type: string
+            enum: [name, iata_code, country]
+            default: name
+        - name: order
+          in: query
+          description: Sort order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+      responses:
+        '200':
+          description: List of airlines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AirlineListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /airlines/{code}:
+    get:
+      tags:
+        - Airlines
+      summary: Get airline details
+      description: Get detailed information about a specific airline by IATA or ICAO code
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          description: Airline IATA or ICAO code
+          schema:
+            type: string
+          example: AA
+      responses:
+        '200':
+          description: Airline details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Airline'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /airlines/{code}/fleet:
+    get:
+      tags:
+        - Airlines
+      summary: Get airline fleet
+      description: Get the fleet of aircraft for a specific airline
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          description: Airline IATA or ICAO code
+          schema:
+            type: string
+          example: AA
+        - name: status
+          in: query
+          description: Filter by aircraft status
+          schema:
+            type: string
+            enum: [active, stored, maintenance, all]
+            default: active
+        - name: includeDetails
+          in: query
+          description: Include aircraft type details
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Airline fleet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /airlines/{code}/trigger-update:
+    post:
+      tags:
+        - Airlines
+      summary: Trigger fleet update
+      description: Trigger a scraping job to update the airline's fleet data
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          description: Airline IATA or ICAO code
+          schema:
+            type: string
+          example: AA
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                  description: Force update even if recent data exists
+                  default: false
+                priority:
+                  type: string
+                  enum: [low, normal, high]
+                  default: normal
+                  description: Job priority
+      responses:
+        '202':
+          description: Update triggered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  job_id:
+                    type: string
+                  airline_code:
+                    type: string
+                  status:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /aircraft:
+    get:
+      tags:
+        - Aircraft
+      summary: Search aircraft
+      description: Search aircraft with various filters
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: airline_code
+          in: query
+          description: Filter by airline IATA or ICAO code
+          schema:
+            type: string
+          example: AA
+        - name: aircraft_type
+          in: query
+          description: Filter by aircraft type (IATA code, ICAO code, or model)
+          schema:
+            type: string
+          example: 77W
+        - name: status
+          in: query
+          description: Filter by aircraft status
+          schema:
+            type: string
+            enum: [Active, Stored, Maintenance]
+        - name: registration
+          in: query
+          description: Filter by registration number (partial match)
+          schema:
+            type: string
+          example: N123
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: List of aircraft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AircraftListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /aircraft/{registration}:
+    get:
+      tags:
+        - Aircraft
+      summary: Get aircraft details
+      description: Get detailed information about a specific aircraft by registration
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: registration
+          in: path
+          required: true
+          description: Aircraft registration number
+          schema:
+            type: string
+          example: N12345
+      responses:
+        '200':
+          description: Aircraft details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AircraftDetails'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /aircraft/{registration}/history:
+    get:
+      tags:
+        - Aircraft
+      summary: Get aircraft history
+      description: Get the ownership and fleet change history for an aircraft
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: registration
+          in: path
+          required: true
+          description: Aircraft registration number
+          schema:
+            type: string
+          example: N12345
+      responses:
+        '200':
+          description: Aircraft history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AircraftHistoryResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /stats/global:
+    get:
+      tags:
+        - Statistics
+      summary: Get global statistics
+      description: Get global fleet statistics across all airlines
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Global statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalStatsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /stats/airline/{code}:
+    get:
+      tags:
+        - Statistics
+      summary: Get airline statistics
+      description: Get statistics for a specific airline
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          description: Airline IATA or ICAO code
+          schema:
+            type: string
+          example: AA
+      responses:
+        '200':
+          description: Airline statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AirlineStatsResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /jobs:
+    get:
+      tags:
+        - Scraping
+      summary: List scraping jobs
+      description: Get statistics about scraping jobs in the queue
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter by job status
+          schema:
+            type: string
+            enum: [pending, running, completed, failed]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Job queue statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+
+    post:
+      tags:
+        - Scraping
+      summary: Create scraping job
+      description: Create a new scraping job for an airline
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - airline_code
+              properties:
+                airline_code:
+                  type: string
+                  description: Airline IATA or ICAO code
+                  example: AA
+                job_type:
+                  type: string
+                  enum: [full_fleet_update, incremental_update]
+                  default: full_fleet_update
+                priority:
+                  type: string
+                  enum: [low, normal, high]
+                  default: normal
+                scheduled_at:
+                  type: string
+                  format: date-time
+                  description: When to run the job (defaults to now)
+      responses:
+        '201':
+          description: Job created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobCreateResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /jobs/{id}:
+    get:
+      tags:
+        - Scraping
+      summary: Get job status
+      description: Get the status and details of a specific scraping job
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Job ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: API key in Bearer token format
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: number
+          description: Server uptime in seconds
+        database:
+          type: string
+          enum: [connected, disconnected, unknown]
+
+    Airline:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        iata_code:
+          type: string
+          minLength: 2
+          maxLength: 2
+          example: AA
+        icao_code:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: AAL
+        name:
+          type: string
+          example: American Airlines
+        country:
+          type: string
+          example: United States
+        hub_airport:
+          type: string
+          nullable: true
+          example: DFW
+        website:
+          type: string
+          format: uri
+          nullable: true
+        data_confidence:
+          type: string
+          enum: [High, Medium, Low]
+        last_scraped_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AirlineListResponse:
+      type: object
+      properties:
+        airlines:
+          type: array
+          items:
+            $ref: '#/components/schemas/Airline'
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+            limit:
+              type: integer
+            offset:
+              type: integer
+
+    Aircraft:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        registration:
+          type: string
+          example: N12345
+        airline_code:
+          type: string
+          example: AA
+        airline_name:
+          type: string
+          example: American Airlines
+        aircraft_type:
+          type: string
+          example: 77W
+        manufacturer:
+          type: string
+          example: Boeing
+        model:
+          type: string
+          example: 777-300ER
+        status:
+          type: string
+          enum: [Active, Stored, Maintenance]
+        current_location:
+          type: string
+          nullable: true
+        delivery_date:
+          type: string
+          format: date
+          nullable: true
+        data_confidence:
+          type: string
+          enum: [High, Medium, Low]
+
+    AircraftDetails:
+      allOf:
+        - $ref: '#/components/schemas/Aircraft'
+        - type: object
+          properties:
+            serial_number:
+              type: string
+              nullable: true
+            manufactured_year:
+              type: integer
+              nullable: true
+            seat_configuration:
+              type: object
+              nullable: true
+            typical_seats:
+              type: integer
+              nullable: true
+            max_seats:
+              type: integer
+              nullable: true
+            range_km:
+              type: integer
+              nullable: true
+            notes:
+              type: string
+              nullable: true
+            last_scraped_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    AircraftListResponse:
+      type: object
+      properties:
+        aircraft:
+          type: array
+          items:
+            $ref: '#/components/schemas/Aircraft'
+        count:
+          type: integer
+
+    FleetResponse:
+      type: object
+      properties:
+        airline_code:
+          type: string
+        airline_name:
+          type: string
+        total_aircraft:
+          type: integer
+        aircraft:
+          type: array
+          items:
+            $ref: '#/components/schemas/Aircraft'
+
+    FleetChange:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        aircraft_id:
+          type: string
+          format: uuid
+        change_type:
+          type: string
+          enum: [acquisition, disposal, transfer, status_change]
+        from_airline_code:
+          type: string
+          nullable: true
+        from_airline_name:
+          type: string
+          nullable: true
+        to_airline_code:
+          type: string
+          nullable: true
+        to_airline_name:
+          type: string
+          nullable: true
+        change_date:
+          type: string
+          format: date
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    AircraftHistoryResponse:
+      type: object
+      properties:
+        registration:
+          type: string
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/FleetChange'
+
+    GlobalStatsResponse:
+      type: object
+      properties:
+        total:
+          type: object
+          properties:
+            total_airlines:
+              type: integer
+            total_aircraft:
+              type: integer
+            total_aircraft_types:
+              type: integer
+            active_aircraft:
+              type: integer
+        by_aircraft_type:
+          type: array
+          items:
+            type: object
+            properties:
+              iata_code:
+                type: string
+              manufacturer:
+                type: string
+              model:
+                type: string
+              count:
+                type: integer
+        by_country:
+          type: array
+          items:
+            type: object
+            properties:
+              country:
+                type: string
+              airline_count:
+                type: integer
+              aircraft_count:
+                type: integer
+
+    AirlineStatsResponse:
+      type: object
+      properties:
+        airline:
+          type: object
+          properties:
+            code:
+              type: string
+            name:
+              type: string
+        fleet:
+          type: object
+          properties:
+            total_aircraft:
+              type: integer
+            active:
+              type: integer
+            stored:
+              type: integer
+            maintenance:
+              type: integer
+            avg_age_years:
+              type: integer
+              nullable: true
+            oldest_delivery:
+              type: string
+              format: date
+              nullable: true
+            newest_delivery:
+              type: string
+              format: date
+              nullable: true
+        by_aircraft_type:
+          type: array
+          items:
+            type: object
+            properties:
+              iata_code:
+                type: string
+              manufacturer:
+                type: string
+              model:
+                type: string
+              count:
+                type: integer
+              active_count:
+                type: integer
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        airline_code:
+          type: string
+        job_type:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        priority:
+          type: string
+          enum: [low, normal, high]
+        scheduled_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        retry_count:
+          type: integer
+        max_retries:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    JobListResponse:
+      type: object
+      properties:
+        stats:
+          type: object
+          properties:
+            total:
+              type: integer
+            pending:
+              type: integer
+            running:
+              type: integer
+            completed:
+              type: integer
+            failed:
+              type: integer
+        message:
+          type: string
+
+    JobCreateResponse:
+      type: object
+      properties:
+        job_id:
+          type: string
+        airline_code:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+          nullable: true
+        details:
+          type: object
+          nullable: true
+
+  responses:
+    UnauthorizedError:
+      description: Authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Unauthorized
+            message: Invalid API key
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Not Found
+            message: Resource not found
+
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Bad Request
+            message: Validation failed
+            details:
+              field: airline_code
+              issue: required
+
+    RateLimitError:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until rate limit resets
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Too Many Requests
+            message: Rate limit exceeded

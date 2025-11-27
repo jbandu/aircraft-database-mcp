@@ -1,0 +1,140 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: aircraft-db-postgres
+    restart: unless-stopped
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: aircraft_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/database/postgres/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aircraft-network
+
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: aircraft-db-neo4j
+    restart: unless-stopped
+    ports:
+      - '7474:7474' # HTTP
+      - '7687:7687' # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/password
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_dbms_memory_heap_max__size: 1G
+      NEO4J_dbms_memory_pagecache_size: 512M
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aircraft-network
+
+  # Redis Cache (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: aircraft-db-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aircraft-network
+
+  # MCP Server + REST API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aircraft-db-api
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: development
+      API_PORT: 3000
+      POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/aircraft_db
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+      API_KEYS: dev-key-1,dev-key-2
+      CORS_ORIGINS: http://localhost:3001,http://localhost:3000
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: llama3.2
+      LLM_MODE: ollama
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:3000/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - aircraft-network
+
+  # Operations Dashboard (Next.js)
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: aircraft-db-dashboard
+    restart: unless-stopped
+    ports:
+      - '3001:3000'
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
+      NEXT_PUBLIC_API_KEY: dev-key-1
+    depends_on:
+      - api
+    networks:
+      - aircraft-network
+
+volumes:
+  postgres_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  aircraft-network:
+    driver: bridge

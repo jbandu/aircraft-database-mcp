@@ -8,7 +8,7 @@ import { queryPostgres } from '../../lib/db-clients.js';
 import { createLogger } from '../../lib/logger.js';
 import { GetAircraftTypeSpecsSchema, safeValidateInput } from '../schemas/tool-schemas.js';
 import { Cache, globalCache } from '../../lib/cache.js';
-import { checkRateLimit, RateLimitError } from '../../lib/rate-limiter.js';
+import { checkRateLimit } from '../../lib/rate-limiter.js';
 
 const logger = createLogger('tool:get-aircraft-type-specs');
 
@@ -121,7 +121,7 @@ export async function handleGetAircraftTypeSpecs(args: any) {
         at.typical_purchase_price_usd,
         -- Usage stats
         (SELECT COUNT(*) FROM aircraft a WHERE a.aircraft_type_id = at.id AND a.status = 'active') as in_service_count,
-        (SELECT COUNT(DISTINCT a.airline_id) FROM aircraft a WHERE a.aircraft_type_id = at.id) as operators_count
+        (SELECT COUNT(DISTINCT a.current_airline_id) FROM aircraft a WHERE a.aircraft_type_id = at.id) as operators_count
       FROM aircraft_types at
       WHERE (
         UPPER(at.model) LIKE UPPER($1)

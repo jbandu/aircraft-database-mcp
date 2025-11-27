@@ -39,8 +39,8 @@ dotenv.config();
 const logger = createLogger('mcp-server');
 
 // MCP Server configuration
-const SERVER_NAME = process.env.MCP_SERVER_NAME || 'aircraft-database';
-const SERVER_VERSION = process.env.MCP_SERVER_VERSION || '1.0.0';
+const SERVER_NAME = process.env['MCP_SERVER_NAME'] || 'aircraft-database';
+const SERVER_VERSION = process.env['MCP_SERVER_VERSION'] || '1.0.0';
 
 /**
  * Main MCP Server class

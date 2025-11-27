@@ -1,0 +1,25 @@
+# Railway Deployment Configuration
+# https://docs.railway.app/deploy/config-as-code
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install && npm run build"
+
+[deploy]
+numReplicas = 1
+startCommand = "npm run start:api"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+
+[[services]]
+name = "aircraft-mcp-api"
+
+[[services.domains]]
+name = "aircraft-api"
+
+[services.variables]
+NODE_ENV = "production"
+API_PORT = "3000"
+LOG_LEVEL = "info"

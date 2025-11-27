@@ -143,7 +143,7 @@ export async function handleGetFleetAvailability(args: any) {
         END as is_available
       FROM aircraft a
       LEFT JOIN aircraft_configurations ac ON a.id = ac.aircraft_id AND ac.is_current = true
-      WHERE a.airline_id = $1
+      WHERE a.current_airline_id = $1
     `;
 
     const params: any[] = [airline.id];

@@ -4,11 +4,8 @@
  * Pre-built Cypher queries for common operations
  */
 
-import { queryNeo4j, getNeo4jDriver } from './db-clients.js';
-import { createLogger } from './logger.js';
+import { queryNeo4j } from './db-clients.js';
 import neo4j from 'neo4j-driver';
-
-const logger = createLogger('neo4j-queries');
 
 /**
  * Get airline fleet composition from Neo4j
@@ -150,7 +147,7 @@ export async function getFleetModernizationStats(airlineCode: string) {
     return null;
   }
 
-  const record = result.records[0];
+  const record = result.records[0]!;
   return {
     airline: record.get('airline'),
     total: record.get('total').toNumber(),

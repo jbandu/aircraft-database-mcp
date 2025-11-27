@@ -7,9 +7,9 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
-const LOG_FORMAT = process.env.LOG_FORMAT || 'json';
-const LOG_FILE_PATH = process.env.LOG_FILE_PATH || './logs/mcp-server.log';
+const LOG_LEVEL = process.env['LOG_LEVEL'] || 'info';
+const LOG_FORMAT = process.env['LOG_FORMAT'] || 'json';
+const LOG_FILE_PATH = process.env['LOG_FILE_PATH'] || './logs/mcp-server.log';
 
 /**
  * Create a Winston logger instance

@@ -26,14 +26,14 @@ export function initializePostgres(): pg.Pool {
   }
 
   const config: pg.PoolConfig = {
-    connectionString: process.env.POSTGRES_URL,
+    connectionString: process.env['POSTGRES_URL'],
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
   };
 
   // Handle SSL for production databases (Neon, Railway, etc.)
-  if (process.env.POSTGRES_SSL === 'true') {
+  if (process.env['POSTGRES_SSL'] === 'true') {
     config.ssl = {
       rejectUnauthorized: false,
     };
@@ -58,9 +58,9 @@ export function initializeNeo4j(): neo4j.Driver {
     return neo4jDriver;
   }
 
-  const uri = process.env.NEO4J_URI || 'bolt://localhost:7687';
-  const user = process.env.NEO4J_USER || 'neo4j';
-  const password = process.env.NEO4J_PASSWORD || 'password';
+  const uri = process.env['NEO4J_URI'] || 'bolt://localhost:7687';
+  const user = process.env['NEO4J_USER'] || 'neo4j';
+  const password = process.env['NEO4J_PASSWORD'] || 'password';
 
   neo4jDriver = neo4j.driver(uri, neo4j.auth.basic(user, password), {
     maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
@@ -88,7 +88,7 @@ export async function initializeDatabases(): Promise<void> {
     logger.info('PostgreSQL connection verified');
 
     // Initialize Neo4j if enabled
-    if (process.env.ENABLE_NEO4J === 'true') {
+    if (process.env['ENABLE_NEO4J'] === 'true') {
       const driver = initializeNeo4j();
 
       // Test Neo4j connection
@@ -131,7 +131,7 @@ export function getNeo4jDriver(): neo4j.Driver {
 /**
  * Execute a PostgreSQL query
  */
-export async function queryPostgres<T = any>(
+export async function queryPostgres<T extends pg.QueryResultRow = any>(
   query: string,
   params?: any[]
 ): Promise<pg.QueryResult<T>> {
@@ -142,10 +142,10 @@ export async function queryPostgres<T = any>(
 /**
  * Execute a Neo4j query
  */
-export async function queryNeo4j<T = any>(
+export async function queryNeo4j(
   cypher: string,
   params?: Record<string, any>
-): Promise<neo4j.QueryResult<T>> {
+): Promise<neo4j.QueryResult> {
   const driver = getNeo4jDriver();
   const session = driver.session();
 
@@ -209,7 +209,7 @@ export async function withTransaction<T>(
  * Transaction helper for Neo4j
  */
 export async function withNeo4jTransaction<T>(
-  callback: (tx: neo4j.Transaction) => Promise<T>
+  callback: (tx: neo4j.ManagedTransaction) => Promise<T>
 ): Promise<T> {
   const driver = getNeo4jDriver();
   const session = driver.session();

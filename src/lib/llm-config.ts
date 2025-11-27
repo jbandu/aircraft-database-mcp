@@ -19,21 +19,21 @@ export interface LLMConfig {
   maxTokens?: number;
 }
 
-const NODE_ENV = process.env.NODE_ENV || 'development';
-const LLM_MODE = (process.env.LLM_MODE as LLMProvider) || 'ollama';
+const NODE_ENV = process.env['NODE_ENV'] || 'development';
+const LLM_MODE = (process.env['LLM_MODE'] as LLMProvider) || 'ollama';
 
 export const LLM_CONFIGS: Record<string, LLMConfig> = {
   development: {
     provider: 'ollama',
-    model: process.env.OLLAMA_MODEL || 'llama3.2',
-    baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+    model: process.env['OLLAMA_MODEL'] || 'llama3.2',
+    baseUrl: process.env['OLLAMA_BASE_URL'] || 'http://localhost:11434',
     temperature: 0.1, // Low temperature for consistent extraction
     maxTokens: 4096,
   },
   production: {
     provider: 'claude',
-    model: process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022',
-    apiKey: process.env.CLAUDE_API_KEY,
+    model: process.env['CLAUDE_MODEL'] || 'claude-3-5-sonnet-20241022',
+    apiKey: process.env['CLAUDE_API_KEY'],
     temperature: 0.1,
     maxTokens: 4096,
   },
@@ -45,15 +45,15 @@ export const LLM_CONFIGS: Record<string, LLMConfig> = {
 export function getLLMConfig(): LLMConfig {
   // Allow override via LLM_MODE env var
   if (LLM_MODE === 'claude') {
-    return LLM_CONFIGS.production;
+    return LLM_CONFIGS['production']!;
   }
 
   if (LLM_MODE === 'ollama') {
-    return LLM_CONFIGS.development;
+    return LLM_CONFIGS['development']!;
   }
 
   // Default based on NODE_ENV
-  return LLM_CONFIGS[NODE_ENV] || LLM_CONFIGS.development;
+  return LLM_CONFIGS[NODE_ENV] || LLM_CONFIGS['development']!;
 }
 
 /**

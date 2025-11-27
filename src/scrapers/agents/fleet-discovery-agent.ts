@@ -12,7 +12,7 @@
  * 5. Return list of aircraft to process
  */
 
-import { chromium, Browser, Page } from 'playwright';
+import { chromium, Browser } from 'playwright';
 import { createLogger } from '../../lib/logger.js';
 import { getLLMClient } from '../../lib/llm-client.js';
 import { queryPostgres } from '../../lib/db-clients.js';
@@ -41,7 +41,7 @@ export class FleetDiscoveryAgent {
 
   constructor() {
     this.userAgent =
-      process.env.SCRAPER_USER_AGENT ||
+      process.env['SCRAPER_USER_AGENT'] ||
       'Mozilla/5.0 (compatible; NumberLabs-AircraftBot/1.0; +https://numberlabs.ai)';
   }
 
@@ -221,7 +221,7 @@ export class FleetDiscoveryAgent {
   private async initBrowser() {
     if (!this.browser) {
       this.browser = await chromium.launch({
-        headless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
+        headless: process.env['PLAYWRIGHT_HEADLESS'] !== 'false',
       });
       logger.info('Browser initialized');
     }

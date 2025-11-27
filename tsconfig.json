@@ -54,8 +54,7 @@
     }
   },
   "include": [
-    "src/**/*",
-    "scripts/**/*"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",

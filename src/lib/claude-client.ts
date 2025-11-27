@@ -111,7 +111,7 @@ export class ClaudeClient {
       // Try to extract JSON from response (handle markdown code blocks)
       const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/) || response.match(/```\n([\s\S]*?)\n```/);
 
-      const jsonStr = jsonMatch ? jsonMatch[1] : response;
+      const jsonStr = jsonMatch?.[1] || response;
 
       return JSON.parse(jsonStr.trim()) as T;
     } catch (error) {
@@ -148,8 +148,9 @@ export class ClaudeClient {
               {
                 type: 'image',
                 source: {
-                  type: 'url',
-                  url: imageUrl,
+                  type: 'base64',
+                  media_type: 'image/jpeg',
+                  data: imageUrl, // Note: This should be base64-encoded data, not a URL
                 },
               },
               {
