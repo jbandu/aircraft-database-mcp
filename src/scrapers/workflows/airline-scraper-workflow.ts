@@ -10,7 +10,7 @@
  */
 
 import { createLogger } from '../../lib/logger.js';
-import { queryPostgres } from '../../lib/db-clients.js';
+import { queryPostgres, initializeDatabases, closeDatabases } from '../../lib/db-clients.js';
 import { FleetDiscoveryAgent } from '../agents/fleet-discovery-agent.js';
 import { AircraftDetailsAgent } from '../agents/aircraft-details-agent.js';
 import { ValidationAgent } from '../agents/validation-agent.js';
@@ -299,19 +299,26 @@ export class AirlineScraperWorkflow {
     // Process each aircraft
     for (const { aircraft, validation } of validated) {
       try {
-        // Skip if validation failed with errors
-        if (!validation.is_valid) {
+        // Only skip if registration is empty/null (truly invalid data)
+        if (!aircraft.registration || aircraft.registration.trim() === '') {
           logger.warn(
-            `Skipping ${aircraft.registration}: ${validation.validation_summary}`
+            `Skipping invalid aircraft: empty registration`
           );
           skipped++;
           details.push({
-            registration: aircraft.registration,
+            registration: aircraft.registration || 'UNKNOWN',
             action: 'skipped',
             confidence: validation.confidence_score,
             issues: validation.issues.length,
           });
           continue;
+        }
+
+        // Always proceed with aircraft that have a registration, regardless of validation issues
+        if (!validation.is_valid) {
+          logger.info(
+            `Processing ${aircraft.registration} with validation issues: ${validation.validation_summary} (confidence: ${validation.confidence_score.toFixed(2)})`
+          );
         }
 
         // Check if aircraft exists
@@ -372,15 +379,21 @@ export class AirlineScraperWorkflow {
         at.iata_code as aircraft_type,
         at.manufacturer,
         at.model,
-        a.msn,
-        a.seat_configuration,
+        a.manufacturer_serial_number as msn,
+        ac.class_first,
+        ac.class_business,
+        ac.class_premium_economy,
+        ac.class_economy,
+        ac.total_seats,
         a.delivery_date,
+        a.age_years,
         a.status,
-        a.current_location,
-        a.last_flight_date,
-        a.data_confidence
+        a.last_seen_date,
+        at.engine_type as engines,
+        a.metadata
       FROM aircraft a
       JOIN aircraft_types at ON a.aircraft_type_id = at.id
+      LEFT JOIN aircraft_configurations ac ON a.id = ac.aircraft_id AND ac.is_current = true
       WHERE UPPER(a.registration) = UPPER($1)
       LIMIT 1
     `;
@@ -392,21 +405,29 @@ export class AirlineScraperWorkflow {
     }
 
     const row = result.rows[0];
+    const metadata = row.metadata || {};
+
     return {
       registration: row.registration,
       aircraft_type: row.aircraft_type,
       manufacturer: row.manufacturer,
       model: row.model,
       msn: row.msn,
-      seat_configuration: row.seat_configuration || {},
+      seat_configuration: {
+        first: row.class_first || undefined,
+        business: row.class_business || undefined,
+        premium_economy: row.class_premium_economy || undefined,
+        economy: row.class_economy || undefined,
+        total: row.total_seats || undefined,
+      },
       delivery_date: row.delivery_date,
-      age_years: null,
+      age_years: row.age_years,
       status: row.status,
-      current_location: row.current_location,
-      last_flight_date: row.last_flight_date,
-      engines: null,
-      confidence_score: row.data_confidence || 0,
-      data_sources: ['database'],
+      current_location: null, // Not stored in schema
+      last_flight_date: row.last_seen_date,
+      engines: row.engines,
+      confidence_score: metadata.confidence_score || 0.9,
+      data_sources: metadata.data_sources || ['database'],
       extracted_at: new Date(),
     };
   }
@@ -415,7 +436,7 @@ export class AirlineScraperWorkflow {
    * Insert new aircraft
    */
   private async insertAircraft(
-    airlineId: number,
+    airlineId: string,
     aircraft: AircraftDetails,
     validation: ValidationResult
   ): Promise<void> {
@@ -431,45 +452,102 @@ export class AirlineScraperWorkflow {
 
     const typeId = typeResult.rows[0].id;
 
+    // Prepare metadata with confidence and sources
+    const metadata = {
+      confidence_score: validation.confidence_score,
+      data_sources: aircraft.data_sources,
+      extracted_at: aircraft.extracted_at.toISOString(),
+    };
+
+    // Calculate age if we have delivery date
+    let ageYears = aircraft.age_years;
+    if (aircraft.delivery_date && !ageYears) {
+      const deliveryYear = new Date(aircraft.delivery_date).getFullYear();
+      const currentYear = new Date().getFullYear();
+      ageYears = currentYear - deliveryYear;
+    }
+
     const insertQuery = `
       INSERT INTO aircraft (
-        airline_id,
+        current_airline_id,
         aircraft_type_id,
         registration,
-        msn,
-        seat_configuration,
+        manufacturer_serial_number,
         delivery_date,
+        age_years,
         status,
-        current_location,
-        last_flight_date,
-        data_confidence,
-        data_sources,
+        last_seen_date,
+        metadata,
         last_scraped_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+      RETURNING id
     `;
 
-    await queryPostgres(insertQuery, [
+    const result = await queryPostgres(insertQuery, [
       airlineId,
       typeId,
       aircraft.registration,
       aircraft.msn,
-      JSON.stringify(aircraft.seat_configuration),
       aircraft.delivery_date,
-      aircraft.status,
-      aircraft.current_location,
-      aircraft.last_flight_date,
-      validation.confidence_score,
-      JSON.stringify(aircraft.data_sources),
+      ageYears,
+      aircraft.status || 'Unknown',
+      aircraft.last_flight_date, // Maps to last_seen_date in DB
+      JSON.stringify(metadata),
     ]);
 
+    const aircraftId = result.rows[0].id;
+
+    // Insert seat configuration if available
+    if (
+      aircraft.seat_configuration &&
+      Object.keys(aircraft.seat_configuration).length > 0
+    ) {
+      await this.insertAircraftConfiguration(aircraftId, aircraft.seat_configuration);
+    }
+
     logger.info(`Inserted new aircraft: ${aircraft.registration}`);
+  }
+
+  /**
+   * Insert aircraft configuration (seat layout)
+   */
+  private async insertAircraftConfiguration(
+    aircraftId: string,
+    seatConfig: {
+      first?: number;
+      business?: number;
+      premium_economy?: number;
+      economy?: number;
+      total?: number;
+    }
+  ): Promise<void> {
+    const insertQuery = `
+      INSERT INTO aircraft_configurations (
+        aircraft_id,
+        class_first,
+        class_business,
+        class_premium_economy,
+        class_economy,
+        total_seats,
+        is_current
+      ) VALUES ($1, $2, $3, $4, $5, $6, true)
+    `;
+
+    await queryPostgres(insertQuery, [
+      aircraftId,
+      seatConfig.first || null,
+      seatConfig.business || null,
+      seatConfig.premium_economy || null,
+      seatConfig.economy || null,
+      seatConfig.total || null,
+    ]);
   }
 
   /**
    * Update existing aircraft
    */
   private async updateAircraft(
-    _airlineId: number,
+    _airlineId: string,
     aircraft: AircraftDetails,
     validation: ValidationResult
   ): Promise<void> {
@@ -485,37 +563,83 @@ export class AirlineScraperWorkflow {
 
     const typeId = typeResult.rows[0].id;
 
+    // Prepare metadata with confidence and sources
+    const metadata = {
+      confidence_score: validation.confidence_score,
+      data_sources: aircraft.data_sources,
+      extracted_at: aircraft.extracted_at.toISOString(),
+    };
+
+    // Calculate age if we have delivery date
+    let ageYears = aircraft.age_years;
+    if (aircraft.delivery_date && !ageYears) {
+      const deliveryYear = new Date(aircraft.delivery_date).getFullYear();
+      const currentYear = new Date().getFullYear();
+      ageYears = currentYear - deliveryYear;
+    }
+
     const updateQuery = `
       UPDATE aircraft
       SET
         aircraft_type_id = $2,
-        msn = COALESCE($3, msn),
-        seat_configuration = COALESCE($4, seat_configuration),
-        delivery_date = COALESCE($5, delivery_date),
+        manufacturer_serial_number = COALESCE($3, manufacturer_serial_number),
+        delivery_date = COALESCE($4, delivery_date),
+        age_years = COALESCE($5, age_years),
         status = $6,
-        current_location = COALESCE($7, current_location),
-        last_flight_date = COALESCE($8, last_flight_date),
-        data_confidence = $9,
-        data_sources = $10,
+        last_seen_date = COALESCE($7, last_seen_date),
+        metadata = $8,
         last_scraped_at = NOW(),
         updated_at = NOW()
       WHERE UPPER(registration) = UPPER($1)
+      RETURNING id
     `;
 
-    await queryPostgres(updateQuery, [
+    const result = await queryPostgres(updateQuery, [
       aircraft.registration,
       typeId,
       aircraft.msn,
-      JSON.stringify(aircraft.seat_configuration),
       aircraft.delivery_date,
-      aircraft.status,
-      aircraft.current_location,
-      aircraft.last_flight_date,
-      validation.confidence_score,
-      JSON.stringify(aircraft.data_sources),
+      ageYears,
+      aircraft.status || 'Unknown',
+      aircraft.last_flight_date, // Maps to last_seen_date in DB
+      JSON.stringify(metadata),
     ]);
 
+    const aircraftId = result.rows[0].id;
+
+    // Update seat configuration if available
+    if (
+      aircraft.seat_configuration &&
+      Object.keys(aircraft.seat_configuration).length > 0
+    ) {
+      await this.updateAircraftConfiguration(aircraftId, aircraft.seat_configuration);
+    }
+
     logger.info(`Updated aircraft: ${aircraft.registration}`);
+  }
+
+  /**
+   * Update aircraft configuration (seat layout)
+   * First marks old configs as not current, then inserts new one
+   */
+  private async updateAircraftConfiguration(
+    aircraftId: string,
+    seatConfig: {
+      first?: number;
+      business?: number;
+      premium_economy?: number;
+      economy?: number;
+      total?: number;
+    }
+  ): Promise<void> {
+    // Mark existing configurations as not current
+    await queryPostgres(
+      `UPDATE aircraft_configurations SET is_current = false WHERE aircraft_id = $1`,
+      [aircraftId]
+    );
+
+    // Insert new configuration
+    await this.insertAircraftConfiguration(aircraftId, seatConfig);
   }
 
   /**
@@ -563,16 +687,21 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
 
-  const workflow = new AirlineScraperWorkflow();
-  workflow
-    .runFullUpdate(airlineCode, { forceFullScrape, dryRun })
-    .then((result) => {
+  // Initialize databases first
+  initializeDatabases()
+    .then(async () => {
+      const workflow = new AirlineScraperWorkflow();
+      return workflow.runFullUpdate(airlineCode, { forceFullScrape, dryRun });
+    })
+    .then(async (result) => {
       console.log('\n=== Workflow Result ===');
       console.log(JSON.stringify(result, null, 2));
+      await closeDatabases();
       process.exit(result.errors > 0 ? 1 : 0);
     })
-    .catch((error) => {
+    .catch(async (error) => {
       console.error('Workflow failed:', error);
+      await closeDatabases();
       process.exit(1);
     });
 }
