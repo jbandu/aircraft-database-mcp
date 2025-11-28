@@ -44,7 +44,8 @@ export class APIServer {
 
   constructor() {
     this.app = express();
-    this.port = parseInt(process.env['API_PORT'] || '3000', 10);
+    // Railway provides PORT env var - use it first, fallback to API_PORT or 3000
+    this.port = parseInt(process.env['PORT'] || process.env['API_PORT'] || '3000', 10);
     this.setupMiddleware();
     this.setupRoutes();
     this.setupErrorHandling();
