@@ -38,6 +38,11 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
 COPY --from=deps --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --chown=appuser:nodejs package.json ./
+
+# Note: openapi.yaml is already copied by build script to dist/api/openapi.yaml
+# It's included in the dist copy above
+
+# Copy database and data directories
 COPY --chown=appuser:nodejs src/database ./src/database
 COPY --chown=appuser:nodejs data ./data
 

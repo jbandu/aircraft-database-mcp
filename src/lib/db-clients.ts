@@ -25,8 +25,15 @@ export function initializePostgres(): pg.Pool {
     return pgPool;
   }
 
+  const postgresUrl = process.env['POSTGRES_URL'];
+  if (!postgresUrl) {
+    const errorMsg = 'POSTGRES_URL environment variable is not set. Please configure your database connection.';
+    logger.error(errorMsg);
+    throw new Error(errorMsg);
+  }
+
   const config: pg.PoolConfig = {
-    connectionString: process.env['POSTGRES_URL'],
+    connectionString: postgresUrl,
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
@@ -103,7 +110,14 @@ export async function initializeDatabases(): Promise<void> {
       logger.info('Neo4j is disabled, skipping initialization');
     }
   } catch (error) {
-    logger.error('Failed to initialize databases:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    logger.error('Failed to initialize databases:', {
+      message: errorMessage,
+      stack: errorStack,
+      postgresUrl: process.env['POSTGRES_URL'] ? 'SET (hidden)' : 'NOT SET',
+      enableNeo4j: process.env['ENABLE_NEO4J'] || 'not set'
+    });
     throw error;
   }
 }
