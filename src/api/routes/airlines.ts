@@ -21,6 +21,53 @@ const router = express.Router();
 const jobQueue = getJobQueue();
 
 /**
+ * GET /airlines/status
+ * Get status for all airlines (for Fleet Management Dashboard)
+ */
+router.get(
+  '/status',
+  asyncHandler(async (req: Request, res: Response) => {
+    const query = `
+      SELECT
+        a.iata_code as code,
+        a.name,
+        a.fleet_size as "fleetSize",
+        COALESCE((
+          SELECT COUNT(*) FROM aircraft ac
+          WHERE ac.airline_id = a.id AND ac.status = 'active'
+        ), 0) as "activeAircraft",
+        COALESCE((
+          SELECT COUNT(*) FROM aircraft ac
+          WHERE ac.airline_id = a.id AND ac.status = 'stored'
+        ), 0) as "storedAircraft",
+        a.last_scraped_at as "lastUpdated",
+        NULL as "lastScrapeJobId",
+        COALESCE(a.data_completeness_score, 0.5) as "averageConfidence",
+        a.fleet_size as "completeRecords",
+        0 as "incompleteRecords",
+        0 as "needsReviewCount",
+        CASE
+          WHEN a.last_scraped_at IS NULL THEN 'empty'
+          WHEN a.last_scraped_at < NOW() - INTERVAL '30 days' THEN 'critical'
+          WHEN a.last_scraped_at < NOW() - INTERVAL '7 days' THEN 'stale'
+          ELSE 'good'
+        END as "dataStatus",
+        EXTRACT(DAY FROM (NOW() - a.last_scraped_at)) as "daysSinceUpdate",
+        (a.last_scraped_at IS NULL OR a.last_scraped_at < NOW() - INTERVAL '7 days') as "needsUpdate",
+        false as "autoUpdateEnabled",
+        NULL as "autoUpdateFrequency",
+        NULL as "nextScheduledUpdate"
+      FROM airlines a
+      WHERE a.iata_code IS NOT NULL
+      ORDER BY a.name
+    `;
+
+    const result = await queryPostgres(query, []);
+    res.json(result.rows);
+  })
+);
+
+/**
  * GET /airlines
  * List all airlines with optional filtering
  */
@@ -44,9 +91,9 @@ router.get(
         name,
         country,
         hub_airport,
-        website,
-        fleet_size_estimate,
-        scrape_enabled,
+        website_url as website,
+        fleet_size as fleet_size_estimate,
+        scrape_status as scrape_enabled,
         last_scraped_at,
         created_at
       FROM airlines
@@ -113,11 +160,11 @@ router.get(
         name,
         country,
         hub_airport,
-        website,
-        fleet_size_estimate,
-        scrape_enabled,
+        website_url as website,
+        fleet_size as fleet_size_estimate,
+        scrape_status as scrape_enabled,
         scrape_source_urls,
-        scrape_schedule_cron,
+        scrape_frequency,
         last_scraped_at,
         created_at,
         updated_at
