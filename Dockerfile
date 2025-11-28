@@ -49,11 +49,11 @@ COPY --chown=appuser:nodejs data ./data
 # Create logs directory
 RUN mkdir -p logs && chown appuser:nodejs logs
 
+# Install curl for healthcheck (must be done as root before USER switch)
+RUN apk add --no-cache curl
+
 # Switch to non-root user
 USER appuser
-
-# Health check using curl (install it in Alpine)
-RUN apk add --no-cache curl
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
