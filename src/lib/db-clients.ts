@@ -36,7 +36,7 @@ export function initializePostgres(): pg.Pool {
     connectionString: postgresUrl,
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 10000, // 10 seconds - Railway/remote databases need more time
   };
 
   // Handle SSL for production databases (Neon, Railway, etc.)
