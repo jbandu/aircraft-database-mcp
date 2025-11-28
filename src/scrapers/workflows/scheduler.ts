@@ -279,7 +279,7 @@ export class ScraperScheduler {
       try {
         // Check if job already exists
         const existingQuery = `
-          SELECT id FROM scraping_jobs
+          SELECT id FROM scrape_jobs
           WHERE airline_id = (SELECT id FROM airlines WHERE iata_code = $1)
             AND status IN ('pending', 'running')
           LIMIT 1

@@ -104,7 +104,7 @@ export async function handleTriggerFleetUpdate(args: any) {
 
       // Create scraping job
       const createJobQuery = `
-        INSERT INTO scraping_jobs (
+        INSERT INTO scrape_jobs (
           airline_id,
           job_type,
           status,
@@ -150,7 +150,7 @@ ${jobIds.length > 10 ? `\n... and ${jobIds.length - 10} more` : ''}
 
 **Status:**
 Jobs have been queued and will be processed by the scraping workflow.
-You can check the status using the scraping_jobs table.
+You can check the status using the scrape_jobs table.
 
 **Note:** The actual scraping process runs asynchronously via the workflow scheduler.
     `.trim();

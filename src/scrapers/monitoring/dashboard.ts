@@ -115,7 +115,7 @@ export class MonitoringDashboard {
         COUNT(*) FILTER (WHERE status = 'completed' AND completed_at > NOW() - INTERVAL '24 hours') as completed_24h,
         COUNT(*) FILTER (WHERE status = 'failed' AND completed_at > NOW() - INTERVAL '24 hours') as failed_24h,
         COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as total_7d
-      FROM scraping_jobs
+      FROM scrape_jobs
     `;
 
     const result = await queryPostgres(query);
@@ -147,7 +147,7 @@ export class MonitoringDashboard {
         sj.aircraft_added,
         sj.aircraft_updated,
         sj.errors_count
-      FROM scraping_jobs sj
+      FROM scrape_jobs sj
       JOIN airlines al ON sj.airline_id = al.id
       ORDER BY sj.started_at DESC
       LIMIT 20
@@ -174,7 +174,7 @@ export class MonitoringDashboard {
         COUNT(*) FILTER (WHERE status = 'completed') as completed,
         COUNT(*) FILTER (WHERE status = 'failed') as failed,
         AVG(duration_seconds) FILTER (WHERE status = 'completed') as avg_duration
-      FROM scraping_jobs
+      FROM scrape_jobs
       WHERE completed_at > NOW() - INTERVAL '24 hours'
     `;
 
@@ -281,7 +281,7 @@ export class MonitoringDashboard {
         AVG(aircraft_found) as avg_aircraft_per_job,
         COUNT(*) FILTER (WHERE completed_at > NOW() - INTERVAL '24 hours') as jobs_per_day,
         EXTRACT(EPOCH FROM (NOW() - MAX(completed_at))) as scraper_uptime
-      FROM scraping_jobs
+      FROM scrape_jobs
       WHERE status IN ('completed', 'failed')
         AND completed_at > NOW() - INTERVAL '30 days'
     `;

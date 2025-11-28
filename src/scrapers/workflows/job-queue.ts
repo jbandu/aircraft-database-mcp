@@ -99,7 +99,7 @@ export class JobQueue {
 
     // Create job
     const insertQuery = `
-      INSERT INTO scraping_jobs (
+      INSERT INTO scrape_jobs (
         job_id,
         airline_code,
         airline_name,
@@ -145,7 +145,7 @@ export class JobQueue {
         error_message,
         result_summary,
         created_at
-      FROM scraping_jobs
+      FROM scrape_jobs
       WHERE status = 'pending'
       ORDER BY
         CASE priority
@@ -192,7 +192,7 @@ export class JobQueue {
     logger.info(`Starting job ${jobId}`);
 
     const query = `
-      UPDATE scraping_jobs
+      UPDATE scrape_jobs
       SET status = 'running',
           started_at = NOW(),
           updated_at = NOW()
@@ -209,7 +209,7 @@ export class JobQueue {
     logger.info(`Completing job ${jobId}`, result);
 
     const query = `
-      UPDATE scraping_jobs
+      UPDATE scrape_jobs
       SET status = 'completed',
           completed_at = NOW(),
           duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER,
@@ -242,7 +242,7 @@ export class JobQueue {
     logger.error(`Job ${jobId} failed:`, error);
 
     // Get current job metadata
-    const getQuery = `SELECT result_summary FROM scraping_jobs WHERE job_id = $1`;
+    const getQuery = `SELECT result_summary FROM scrape_jobs WHERE job_id = $1`;
     const result = await queryPostgres(getQuery, [jobId]);
 
     if (result.rows.length === 0) {
@@ -261,7 +261,7 @@ export class JobQueue {
       logger.info(`Scheduling retry ${retryCount}/${maxRetries} for job ${jobId} at ${nextRetryAt}`);
 
       const updateQuery = `
-        UPDATE scraping_jobs
+        UPDATE scrape_jobs
         SET status = 'pending',
             result_summary = $2,
             error_message = $3,
@@ -286,7 +286,7 @@ export class JobQueue {
       logger.error(`Job ${jobId} failed permanently after ${retryCount} retries`);
 
       const updateQuery = `
-        UPDATE scraping_jobs
+        UPDATE scrape_jobs
         SET status = 'failed',
             completed_at = NOW(),
             duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER,
@@ -310,7 +310,7 @@ export class JobQueue {
     logger.info(`Cancelling job ${jobId}`);
 
     const query = `
-      UPDATE scraping_jobs
+      UPDATE scrape_jobs
       SET status = 'cancelled',
           completed_at = NOW(),
           updated_at = NOW()
@@ -342,7 +342,7 @@ export class JobQueue {
         error_message,
         result_summary,
         created_at
-      FROM scraping_jobs
+      FROM scrape_jobs
       WHERE job_id = $1
     `;
 
@@ -390,7 +390,7 @@ export class JobQueue {
         COUNT(*) FILTER (WHERE status = 'completed') as completed,
         COUNT(*) FILTER (WHERE status = 'failed') as failed,
         COUNT(*) as total
-      FROM scraping_jobs
+      FROM scrape_jobs
       WHERE created_at > NOW() - INTERVAL '7 days'
     `;
 
@@ -413,7 +413,7 @@ export class JobQueue {
     logger.info(`Cleaning up jobs older than ${daysToKeep} days`);
 
     const query = `
-      DELETE FROM scraping_jobs
+      DELETE FROM scrape_jobs
       WHERE status IN ('completed', 'failed', 'cancelled')
         AND completed_at < NOW() - INTERVAL '${daysToKeep} days'
     `;
