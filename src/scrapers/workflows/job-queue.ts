@@ -15,8 +15,8 @@ export type JobPriority = 'low' | 'normal' | 'high';
 export type JobType = 'full_fleet_update' | 'aircraft_details' | 'validation';
 
 export interface ScrapeJob {
-  id: string;
-  airline_id: number;
+  id: number;
+  job_id: string;
   airline_code: string;
   job_type: JobType;
   status: JobStatus;
@@ -71,9 +71,9 @@ export class JobQueue {
       scheduledAt,
     });
 
-    // Get airline ID
+    // Verify airline exists
     const airlineQuery = `
-      SELECT id FROM airlines
+      SELECT iata_code, name FROM airlines
       WHERE UPPER(iata_code) = UPPER($1) OR UPPER(icao_code) = UPPER($1)
       LIMIT 1
     `;
@@ -83,22 +83,12 @@ export class JobQueue {
       throw new Error(`Airline not found: ${airlineCode}`);
     }
 
-    const airlineId = airlineResult.rows[0].id;
+    const airline = airlineResult.rows[0];
 
-    // Create job
-    const insertQuery = `
-      INSERT INTO scraping_jobs (
-        airline_id,
-        job_type,
-        status,
-        priority,
-        started_at,
-        metadata
-      )
-      VALUES ($1, $2, 'pending', $3, $4, $5)
-      RETURNING id
-    `;
+    // Generate job ID
+    const jobId = `job_${airline.iata_code}_${Date.now()}`;
 
+    // Create job metadata
     const jobMetadata = {
       ...metadata,
       max_retries: maxRetries,
@@ -107,18 +97,35 @@ export class JobQueue {
       scheduled_at: scheduledAt.toISOString(),
     };
 
+    // Create job
+    const insertQuery = `
+      INSERT INTO scraping_jobs (
+        job_id,
+        airline_code,
+        airline_name,
+        job_type,
+        status,
+        priority,
+        started_at,
+        result_summary
+      )
+      VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7)
+      RETURNING job_id
+    `;
+
     const result = await queryPostgres(insertQuery, [
-      airlineId,
+      jobId,
+      airline.iata_code,
+      airline.name,
       jobType,
       priority,
       scheduledAt,
       JSON.stringify(jobMetadata),
     ]);
 
-    const jobId = result.rows[0].id;
-    logger.info(`Job created: ${jobId} for airline ${airlineCode}`);
+    logger.info(`Job created: ${result.rows[0].job_id} for airline ${airlineCode}`);
 
-    return jobId;
+    return result.rows[0].job_id;
   }
 
   /**
@@ -127,26 +134,26 @@ export class JobQueue {
   async getNextJob(): Promise<ScrapeJob | null> {
     const query = `
       SELECT
-        sj.id,
-        sj.airline_id,
-        al.iata_code as airline_code,
-        sj.job_type,
-        sj.status,
-        sj.started_at,
-        sj.completed_at,
-        sj.error_details,
-        sj.metadata
-      FROM scraping_jobs sj
-      JOIN airlines al ON sj.airline_id = al.id
-      WHERE sj.status = 'pending'
-        AND (sj.metadata->>'scheduled_at')::timestamptz <= NOW()
+        id,
+        job_id,
+        airline_code,
+        job_type,
+        status,
+        priority,
+        started_at,
+        completed_at,
+        error_message,
+        result_summary,
+        created_at
+      FROM scraping_jobs
+      WHERE status = 'pending'
       ORDER BY
-        CASE sj.priority
+        CASE priority
           WHEN 'high' THEN 1
           WHEN 'normal' THEN 2
           WHEN 'low' THEN 3
         END,
-        sj.created_at ASC
+        created_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     `;
@@ -158,22 +165,22 @@ export class JobQueue {
     }
 
     const row = result.rows[0];
-    const metadata = row.metadata || {};
+    const metadata = row.result_summary || {};
 
     return {
       id: row.id,
-      airline_id: row.airline_id,
+      job_id: row.job_id,
       airline_code: row.airline_code,
       job_type: row.job_type,
       status: row.status,
-      priority: metadata.priority || 'normal',
+      priority: row.priority || 'normal',
       max_retries: metadata.max_retries || 3,
       retry_count: metadata.retry_count || 0,
       retry_delay_minutes: metadata.retry_delay_minutes || 30,
-      scheduled_at: new Date(metadata.scheduled_at),
+      scheduled_at: metadata.scheduled_at ? new Date(metadata.scheduled_at) : new Date(row.created_at),
       started_at: row.started_at ? new Date(row.started_at) : null,
       completed_at: row.completed_at ? new Date(row.completed_at) : null,
-      error_message: row.error_details?.message || null,
+      error_message: row.error_message || null,
       metadata,
     };
   }
@@ -187,8 +194,9 @@ export class JobQueue {
     const query = `
       UPDATE scraping_jobs
       SET status = 'running',
-          started_at = NOW()
-      WHERE id = $1
+          started_at = NOW(),
+          updated_at = NOW()
+      WHERE job_id = $1
     `;
 
     await queryPostgres(query, [jobId]);
@@ -205,11 +213,13 @@ export class JobQueue {
       SET status = 'completed',
           completed_at = NOW(),
           duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER,
-          aircraft_found = $2,
-          aircraft_added = $3,
-          aircraft_updated = $4,
-          errors_count = $5
-      WHERE id = $1
+          discovered_count = $2,
+          new_count = $3,
+          updated_count = $4,
+          error_count = $5,
+          progress = 100,
+          updated_at = NOW()
+      WHERE job_id = $1
     `;
 
     await queryPostgres(query, [
@@ -232,14 +242,14 @@ export class JobQueue {
     logger.error(`Job ${jobId} failed:`, error);
 
     // Get current job metadata
-    const getQuery = `SELECT metadata FROM scraping_jobs WHERE id = $1`;
+    const getQuery = `SELECT result_summary FROM scraping_jobs WHERE job_id = $1`;
     const result = await queryPostgres(getQuery, [jobId]);
 
     if (result.rows.length === 0) {
       throw new Error(`Job not found: ${jobId}`);
     }
 
-    const metadata = result.rows[0].metadata || {};
+    const metadata = result.rows[0].result_summary || {};
     const retryCount = (metadata.retry_count || 0) + 1;
     const maxRetries = metadata.max_retries || 3;
     const retryDelayMinutes = metadata.retry_delay_minutes || 30;
@@ -253,9 +263,10 @@ export class JobQueue {
       const updateQuery = `
         UPDATE scraping_jobs
         SET status = 'pending',
-            metadata = $2,
-            error_details = $3
-        WHERE id = $1
+            result_summary = $2,
+            error_message = $3,
+            updated_at = NOW()
+        WHERE job_id = $1
       `;
 
       const updatedMetadata = {
@@ -268,7 +279,7 @@ export class JobQueue {
       await queryPostgres(updateQuery, [
         jobId,
         JSON.stringify(updatedMetadata),
-        JSON.stringify({ message: error.message, stack: error.stack }),
+        error.message,
       ]);
     } else {
       // Mark as failed
@@ -279,14 +290,15 @@ export class JobQueue {
         SET status = 'failed',
             completed_at = NOW(),
             duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER,
-            error_details = $2,
-            errors_count = errors_count + 1
-        WHERE id = $1
+            error_message = $2,
+            error_count = error_count + 1,
+            updated_at = NOW()
+        WHERE job_id = $1
       `;
 
       await queryPostgres(updateQuery, [
         jobId,
-        JSON.stringify({ message: error.message, stack: error.stack }),
+        error.message,
       ]);
     }
   }
@@ -300,8 +312,9 @@ export class JobQueue {
     const query = `
       UPDATE scraping_jobs
       SET status = 'cancelled',
-          completed_at = NOW()
-      WHERE id = $1 AND status IN ('pending', 'running')
+          completed_at = NOW(),
+          updated_at = NOW()
+      WHERE job_id = $1 AND status IN ('pending', 'running')
     `;
 
     await queryPostgres(query, [jobId]);
@@ -313,23 +326,24 @@ export class JobQueue {
   async getJobStatus(jobId: string): Promise<ScrapeJob | null> {
     const query = `
       SELECT
-        sj.id,
-        sj.airline_id,
-        al.iata_code as airline_code,
-        sj.job_type,
-        sj.status,
-        sj.started_at,
-        sj.completed_at,
-        sj.duration_seconds,
-        sj.aircraft_found,
-        sj.aircraft_added,
-        sj.aircraft_updated,
-        sj.errors_count,
-        sj.error_details,
-        sj.metadata
-      FROM scraping_jobs sj
-      JOIN airlines al ON sj.airline_id = al.id
-      WHERE sj.id = $1
+        id,
+        job_id,
+        airline_code,
+        job_type,
+        status,
+        priority,
+        started_at,
+        completed_at,
+        duration_seconds,
+        discovered_count,
+        new_count,
+        updated_count,
+        error_count,
+        error_message,
+        result_summary,
+        created_at
+      FROM scraping_jobs
+      WHERE job_id = $1
     `;
 
     const result = await queryPostgres(query, [jobId]);
@@ -339,22 +353,22 @@ export class JobQueue {
     }
 
     const row = result.rows[0];
-    const metadata = row.metadata || {};
+    const metadata = row.result_summary || {};
 
     return {
       id: row.id,
-      airline_id: row.airline_id,
+      job_id: row.job_id,
       airline_code: row.airline_code,
       job_type: row.job_type,
       status: row.status,
-      priority: metadata.priority || 'normal',
+      priority: row.priority || 'normal',
       max_retries: metadata.max_retries || 3,
       retry_count: metadata.retry_count || 0,
       retry_delay_minutes: metadata.retry_delay_minutes || 30,
-      scheduled_at: new Date(metadata.scheduled_at),
+      scheduled_at: metadata.scheduled_at ? new Date(metadata.scheduled_at) : new Date(row.created_at),
       started_at: row.started_at ? new Date(row.started_at) : null,
       completed_at: row.completed_at ? new Date(row.completed_at) : null,
-      error_message: row.error_details?.message || null,
+      error_message: row.error_message || null,
       metadata,
     };
   }

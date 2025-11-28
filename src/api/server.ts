@@ -19,6 +19,10 @@ import { authMiddleware } from './middleware/auth.js';
 import { rateLimitMiddleware } from './middleware/rate-limit.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
+import { auditLoggerMiddleware } from './middleware/audit-logger.js';
+import { aggressiveValidation } from './middleware/validation.js';
+import { initializeDatabases, closeDatabases } from '../lib/db-clients.js';
+import { ScraperScheduler } from '../scrapers/workflows/scheduler.js';
 
 // Route imports
 import airlinesRouter from './routes/airlines.js';
@@ -35,6 +39,8 @@ const logger = createLogger('api-server');
 export class APIServer {
   private app: Express;
   private port: number;
+  private scheduler: ScraperScheduler | null = null;
+  private server: any = null;
 
   constructor() {
     this.app = express();
@@ -42,6 +48,7 @@ export class APIServer {
     this.setupMiddleware();
     this.setupRoutes();
     this.setupErrorHandling();
+    this.setupGracefulShutdown();
   }
 
   /**
@@ -71,6 +78,9 @@ export class APIServer {
     // Request logging
     this.app.use(requestLogger);
 
+    // Input validation (aggressive XSS/SQLi detection)
+    this.app.use(aggressiveValidation);
+
     // Rate limiting (global)
     this.app.use(rateLimitMiddleware);
 
@@ -81,6 +91,9 @@ export class APIServer {
       }
       return authMiddleware(req, res, next);
     });
+
+    // Audit logging (after authentication)
+    this.app.use(auditLoggerMiddleware);
   }
 
   /**
@@ -166,14 +179,83 @@ export class APIServer {
    * Start the server
    */
   async start(): Promise<void> {
-    return new Promise((resolve) => {
-      this.app.listen(this.port, () => {
+    // Initialize databases
+    logger.info('Initializing databases...');
+    await initializeDatabases();
+    logger.info('Databases initialized successfully');
+
+    // Start HTTP server
+    await new Promise<void>((resolve) => {
+      this.server = this.app.listen(this.port, () => {
         logger.info(`API server listening on port ${this.port}`);
         logger.info(`API documentation: http://localhost:${this.port}/api-docs`);
         logger.info(`Health check: http://localhost:${this.port}/health`);
         resolve();
       });
     });
+
+    // Start scraper scheduler if enabled
+    const schedulerEnabled = process.env['SCRAPER_SCHEDULER_ENABLED'] !== 'false';
+    if (schedulerEnabled) {
+      logger.info('Starting scraper scheduler...');
+      this.scheduler = new ScraperScheduler();
+      await this.scheduler.start();
+      logger.info('Scraper scheduler started successfully');
+    } else {
+      logger.info('Scraper scheduler disabled (set SCRAPER_SCHEDULER_ENABLED=true to enable)');
+    }
+  }
+
+  /**
+   * Stop the server gracefully
+   */
+  async stop(): Promise<void> {
+    logger.info('Stopping API server...');
+
+    // Stop scheduler first
+    if (this.scheduler) {
+      logger.info('Stopping scraper scheduler...');
+      await this.scheduler.stop();
+      logger.info('Scraper scheduler stopped');
+    }
+
+    // Close HTTP server
+    if (this.server) {
+      await new Promise<void>((resolve, reject) => {
+        this.server.close((err: Error | undefined) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+      logger.info('HTTP server stopped');
+    }
+
+    // Close databases
+    await closeDatabases();
+    logger.info('Database connections closed');
+    logger.info('API server stopped successfully');
+  }
+
+  /**
+   * Setup graceful shutdown handlers
+   */
+  private setupGracefulShutdown(): void {
+    const shutdown = async (signal: string) => {
+      logger.info(`Received ${signal}, shutting down gracefully...`);
+      try {
+        await this.stop();
+        process.exit(0);
+      } catch (error) {
+        logger.error('Error during shutdown:', error);
+        process.exit(1);
+      }
+    };
+
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
   }
 
   /**

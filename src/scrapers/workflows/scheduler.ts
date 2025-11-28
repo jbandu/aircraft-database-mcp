@@ -152,7 +152,7 @@ export class ScraperScheduler {
 
           if (job) {
             logger.info(
-              `Found pending job: ${job.id} for ${job.airline_code} (${this.activeJobs.size + 1}/${this.config.maxConcurrentJobs})`
+              `Found pending job: ${job.job_id} for ${job.airline_code} (${this.activeJobs.size + 1}/${this.config.maxConcurrentJobs})`
             );
             await this.executeJob(job);
           } else {
@@ -179,21 +179,21 @@ export class ScraperScheduler {
     const jobPromise = (async () => {
       try {
         // Mark job as running
-        await this.jobQueue.startJob(job.id);
+        await this.jobQueue.startJob(job.job_id);
 
         // Create workflow with configured concurrency
         const workflow = new AirlineScraperWorkflow({
           concurrencyLimit: this.config.workflowConcurrency,
         });
 
-        logger.info(`Executing job ${job.id} for ${job.airline_code}`);
+        logger.info(`Executing job ${job.job_id} for ${job.airline_code}`);
 
         // Run the workflow
         const result = await workflow.runFullUpdate(job.airline_code);
 
         // Mark job as completed
-        await this.jobQueue.completeJob(job.id, {
-          job_id: job.id,
+        await this.jobQueue.completeJob(job.job_id, {
+          job_id: job.job_id,
           success: result.errors === 0,
           aircraft_found: result.aircraft_found,
           aircraft_added: result.aircraft_added,
@@ -203,26 +203,26 @@ export class ScraperScheduler {
         });
 
         logger.info(
-          `Job ${job.id} completed successfully: ${result.aircraft_found} found, ${result.aircraft_added} added, ${result.aircraft_updated} updated`
+          `Job ${job.job_id} completed successfully: ${result.aircraft_found} found, ${result.aircraft_added} added, ${result.aircraft_updated} updated`
         );
       } catch (error) {
-        logger.error(`Job ${job.id} failed:`, error);
+        logger.error(`Job ${job.job_id} failed:`, error);
 
         // Mark job as failed (with retry if appropriate)
         const shouldRetry = this.shouldRetryJob(error);
         await this.jobQueue.failJob(
-          job.id,
+          job.job_id,
           error instanceof Error ? error : new Error(String(error)),
           shouldRetry
         );
       } finally {
         // Remove from active jobs
-        this.activeJobs.delete(job.id);
+        this.activeJobs.delete(job.job_id);
       }
     })();
 
     // Track active job
-    this.activeJobs.set(job.id, jobPromise);
+    this.activeJobs.set(job.job_id, jobPromise);
   }
 
   /**

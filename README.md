@@ -115,10 +115,15 @@ MCP_SERVER_NAME=aircraft-database
 MCP_SERVER_VERSION=1.0.0
 LOG_LEVEL=info
 
-# REST API (optional)
+# REST API
 API_PORT=3000
 API_KEYS=your-api-key-1,your-api-key-2
 CORS_ORIGINS=http://localhost:3000,https://app.example.com
+
+# Scraper Scheduler (runs with API server)
+SCRAPER_SCHEDULER_ENABLED=true       # Enable/disable scheduler
+SCRAPER_CONCURRENT_LIMIT=3           # Max concurrent jobs
+SCRAPER_POLL_INTERVAL_MS=5000        # Job queue poll interval
 ```
 
 ### 3. Set Up Databases
@@ -333,6 +338,8 @@ The API will start on `http://localhost:3000` (or the port specified in `API_POR
 npm run build
 npm run start:api
 ```
+
+**Note**: The scraper scheduler is automatically integrated with the API server and will start automatically. It polls the job queue every 5 seconds and processes pending scraping jobs in the background. To disable the scheduler, set `SCRAPER_SCHEDULER_ENABLED=false` in your `.env` file.
 
 ### API Documentation
 
@@ -591,32 +598,54 @@ npm run db:reset
 
 ## Web Scraping
 
-### Run Manual Scraping Workflow
+The scraping system consists of two components:
+
+1. **Job Scheduler** (automatic) - Runs with the API server, processes queued jobs
+2. **Job Queue** - Created via REST API or MCP tool calls
+
+### How Scraping Works
+
+When you trigger a fleet update (via REST API or MCP tool):
+1. A job is created in the `scraping_jobs` table with status `pending`
+2. The scheduler (running with API server) polls the queue every 5 seconds
+3. Jobs are picked up and executed by the scraping workflow
+4. Results are saved to the database and job status updated to `completed`
+
+### Scheduler Configuration
+
+The scheduler runs automatically with the API server. Configure in `.env`:
 
 ```bash
-npm run scraper:run
-```
+# Enable/disable scheduler (runs with API server)
+SCRAPER_SCHEDULER_ENABLED=true
 
-### Start Scheduled Scraping
+# Job processing settings
+SCRAPER_CONCURRENT_LIMIT=3          # Max concurrent jobs
+SCRAPER_POLL_INTERVAL_MS=5000       # Poll interval (ms)
+SCRAPER_WORKFLOW_CONCURRENCY=5      # Parallel aircraft per job
 
-```bash
-npm run scraper:schedule
-```
+# Automatic scheduling (creates jobs on schedule)
+SCRAPER_SCHEDULE_ENABLED=false      # Enable cron-based job creation
+SCRAPER_SCHEDULE_CRON=0 2 * * *     # Daily at 2 AM
 
-This runs the scraper on a schedule (default: daily at 2 AM).
-
-### Scraping Configuration
-
-Edit `.env` to configure scraping behavior:
-
-```bash
+# Scraper behavior
 SCRAPER_USER_AGENT=Mozilla/5.0 (compatible; NumberLabs-AircraftBot/1.0)
 SCRAPER_RATE_LIMIT_MS=2000
 SCRAPER_TIMEOUT_MS=30000
 SCRAPER_MAX_RETRIES=3
-SCRAPER_CONCURRENT_LIMIT=5
-SCRAPER_SCHEDULE_CRON=0 2 * * *
 ```
+
+### Manual Scraping Commands
+
+```bash
+# Run a single airline scrape directly (bypasses scheduler)
+npm run scraper:run -- --airline=AA
+
+# Run scheduler only (without API server)
+npm run scraper:schedule
+```
+
+**Recommended**: Use the REST API or MCP tool to create jobs instead of running scrapers directly.
 
 ## Connecting Consumer Apps
 

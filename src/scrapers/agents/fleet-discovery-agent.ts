@@ -114,7 +114,7 @@ export class FleetDiscoveryAgent {
    */
   private async getAirlineInfo(airlineCode: string) {
     const query = `
-      SELECT id, iata_code, icao_code, name, website_url, scrape_source_urls
+      SELECT id, iata_code, icao_code, name, website, metadata
       FROM airlines
       WHERE UPPER(iata_code) = UPPER($1) OR UPPER(icao_code) = UPPER($1)
       LIMIT 1
@@ -130,11 +130,11 @@ export class FleetDiscoveryAgent {
   private async findDiscoverySources(airline: any): Promise<DiscoverySource[]> {
     const sources: DiscoverySource[] = [];
 
-    // 1. Stored scrape sources from database
-    if (airline.scrape_source_urls) {
-      const urls = Array.isArray(airline.scrape_source_urls)
-        ? airline.scrape_source_urls
-        : airline.scrape_source_urls.urls || [];
+    // 1. Stored scrape sources from metadata
+    if (airline.metadata?.scrape_source_urls) {
+      const urls = Array.isArray(airline.metadata.scrape_source_urls)
+        ? airline.metadata.scrape_source_urls
+        : [airline.metadata.scrape_source_urls];
 
       for (const url of urls) {
         sources.push({
@@ -146,9 +146,9 @@ export class FleetDiscoveryAgent {
     }
 
     // 2. Official website
-    if (airline.website_url) {
+    if (airline.website) {
       sources.push({
-        url: airline.website_url,
+        url: airline.website,
         type: 'official',
         priority: 2,
       });
@@ -237,50 +237,62 @@ export class FleetDiscoveryAgent {
   ): Promise<string[]> {
     logger.info('Extracting registrations with LLM');
 
-    // Truncate HTML if too long (keep relevant parts)
-    const truncatedHtml = this.truncateHTML(html);
+    // Truncate HTML more aggressively for faster processing
+    const truncatedHtml = this.truncateHTML(html, 8000); // Reduced from 15000
 
-    const prompt = `You are analyzing a webpage to extract aircraft registration numbers (tail numbers) for ${airline.name} (${airline.iata_code}/${airline.icao_code}).
+    const prompt = `Extract aircraft tail numbers for ${airline.name} (${airline.iata_code}) from this HTML.
 
 URL: ${url}
 
-HTML Content (truncated):
+HTML (truncated):
 ${truncatedHtml}
 
-Extract ALL aircraft registration numbers found on this page. Aircraft registrations typically:
-- Start with a country code (e.g., N for USA, G for UK, D for Germany)
-- Follow formats like: N12345, G-ABCD, D-ABCD, VH-ABC, etc.
-- Are usually displayed in tables, lists, or structured data
-- May be in columns labeled "Registration", "Tail Number", "Reg", "MSN"
+TASK: Find all aircraft registration numbers (tail numbers). They look like:
+- N12345 (USA)
+- HP-1234CMP, HP-1234 (Panama - Copa uses these)
+- G-ABCD (UK)
+- D-ABCD (Germany)
 
-Return a JSON array of registration numbers found. Only include valid registrations.
+Look for:
+- Tables with "Registration", "Reg", "Tail", "MSN" columns
+- Lists of aircraft
+- <td>, <span>, <div> tags containing registration patterns
 
-Example response:
-{
-  "registrations": ["N12345", "N12346", "N12347"]
-}
+Return ONLY valid JSON:
+{"registrations": ["HP-1234CMP", "HP-1235CMP"]}
 
-If no registrations are found, return:
-{
-  "registrations": []
-}`;
+If none found:
+{"registrations": []}`;
 
     try {
       const response = await this.llm.generateJSON<{ registrations: string[] }>(
         prompt,
         {
-          temperature: 0.1,
+          temperature: 0.0, // More deterministic
+          maxTokens: 2048, // Limit response size
           system:
-            'You are an expert at extracting structured data from HTML. Always respond with valid JSON.',
+            'Extract data from HTML. Output valid JSON only. Be fast and accurate.',
         }
       );
 
       const registrations = response.registrations || [];
-      logger.info(`Extracted ${registrations.length} registrations`);
+      logger.info(`Extracted ${registrations.length} registrations from ${url}`);
 
-      return registrations;
+      // Filter out obviously invalid registrations
+      const validRegistrations = registrations.filter(reg =>
+        reg && reg.length >= 4 && reg.length <= 10 && /[A-Z0-9-]/.test(reg)
+      );
+
+      logger.info(`${validRegistrations.length} valid registrations after filtering`);
+      return validRegistrations;
     } catch (error) {
       logger.error('LLM extraction failed:', error);
+
+      // Return empty array on timeout/error so workflow can continue
+      if ((error as any)?.code === 'ECONNABORTED' || (error as Error)?.message?.includes('timeout')) {
+        logger.warn('LLM extraction timed out - continuing with empty result');
+      }
+
       return [];
     }
   }

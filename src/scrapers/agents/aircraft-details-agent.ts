@@ -124,16 +124,20 @@ export class AircraftDetailsAgent {
         at.iata_code as aircraft_type,
         at.manufacturer,
         at.model,
-        a.msn,
-        a.seat_configuration,
+        a.manufacturer_serial_number as msn,
+        ac.class_first as first_class_seats,
+        ac.class_business as business_class_seats,
+        ac.class_premium_economy as premium_economy_seats,
+        ac.class_economy as economy_class_seats,
+        ac.total_seats,
         a.delivery_date,
-        EXTRACT(YEAR FROM AGE(CURRENT_DATE, a.delivery_date))::INTEGER as age_years,
+        a.age_years,
         a.status,
-        a.current_location,
-        a.last_flight_date,
-        at.engine_type as engines
+        at.engine_type as engines,
+        a.last_seen_date
       FROM aircraft a
       JOIN aircraft_types at ON a.aircraft_type_id = at.id
+      LEFT JOIN aircraft_configurations ac ON a.id = ac.aircraft_id AND ac.is_current = true
       WHERE UPPER(a.registration) = UPPER($1)
       LIMIT 1
     `;
@@ -151,12 +155,18 @@ export class AircraftDetailsAgent {
       manufacturer: row.manufacturer,
       model: row.model,
       msn: row.msn,
-      seat_configuration: row.seat_configuration || {},
+      seat_configuration: {
+        first: row.first_class_seats || undefined,
+        business: row.business_class_seats || undefined,
+        premium_economy: row.premium_economy_seats || undefined,
+        economy: row.economy_class_seats || undefined,
+        total: row.total_seats || undefined,
+      },
       delivery_date: row.delivery_date,
       age_years: row.age_years,
       status: row.status,
-      current_location: row.current_location,
-      last_flight_date: row.last_flight_date,
+      current_location: null, // Not stored in current schema
+      last_flight_date: row.last_seen_date || null,
       engines: row.engines,
       confidence_score: 0.9, // Existing DB data is high confidence
       data_sources: ['database'],

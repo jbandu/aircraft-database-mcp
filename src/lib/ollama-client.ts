@@ -45,13 +45,17 @@ export class OllamaClient {
     this.baseUrl = config.baseUrl!;
     this.model = config.model;
 
+    const timeout = parseInt(process.env['LLM_TIMEOUT_MS'] || '30000', 10);
+
     this.client = axios.create({
       baseURL: this.baseUrl,
-      timeout: 120000, // 2 minute timeout for LLM inference
+      timeout, // Configurable timeout (default 30s)
       headers: {
         'Content-Type': 'application/json',
       },
     });
+
+    logger.info(`Ollama timeout set to ${timeout}ms`);
 
     logger.info(`Ollama client initialized: ${this.baseUrl} (model: ${this.model})`);
   }
