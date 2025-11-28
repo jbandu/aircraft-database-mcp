@@ -26,7 +26,7 @@ const jobQueue = getJobQueue();
  */
 router.get(
   '/status',
-  asyncHandler(async (req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     const query = `
       SELECT
         a.iata_code as code,
