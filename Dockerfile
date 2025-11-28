@@ -1,10 +1,10 @@
 # Multi-stage build for Aircraft Database MCP Server
 
-# Stage 1: Dependencies
+# Stage 1: Dependencies (production only)
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install dependencies only when needed
+# Install production dependencies only
 COPY package.json package-lock.json ./
 RUN npm ci --only=production && npm cache clean --force
 
@@ -12,9 +12,11 @@ RUN npm ci --only=production && npm cache clean --force
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Copy dependencies from deps stage
-COPY --from=deps /app/node_modules ./node_modules
+# Install ALL dependencies (including devDependencies for build)
 COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci
+
+# Copy source code
 COPY src ./src
 
 # Build TypeScript
