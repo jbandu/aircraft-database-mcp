@@ -52,9 +52,11 @@ RUN mkdir -p logs && chown appuser:nodejs logs
 # Switch to non-root user
 USER appuser
 
-# Health check using wget (available in Alpine)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+# Health check using curl (install it in Alpine)
+RUN apk add --no-cache curl
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
 
 # Expose port
 EXPOSE 3000
