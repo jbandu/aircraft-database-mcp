@@ -1316,5 +1316,20 @@
     "scrape_urls": [],
     "priority": "normal",
     "schedule": "0 5 * * 0"
+  },
+  {
+    "rank": 101,
+    "iata": "CM",
+    "icao": "CMP",
+    "name": "Copa Airlines",
+    "country": "Panama",
+    "hub": "MPTO",
+    "fleet_size": 107,
+    "website": "https://www.copaair.com",
+    "scrape_urls": [
+      "https://www.copaair.com/en-us/discover-copa-airlines/about-copa-airlines/fleet"
+    ],
+    "priority": "normal",
+    "schedule": "0 5 * * *"
   }
 ]
